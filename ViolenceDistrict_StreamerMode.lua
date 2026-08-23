@@ -1,9 +1,13 @@
 --[[
     ============================================================
-      VIOLENCE DISTRICT — REBUILT LOADER
+      VIOLENCE DISTRICT — STREAMER MODE PRO
       Dirombak oleh: Ghost
-      Tambahan baru:
-        [x] STREAMER MODE / OBS MODE (toggle on/off)
+      Fitur:
+        [x] STREAMER / OBS MODE (toggle on/off)
+        [x] PANIC BUTTON F8 — sekali pencet semua bersih
+        [x] WATERMARK OBS — branding "LIVE" di pojok layar
+        [x] KEYBIND CUSTOM — semua tombol bisa diganti di config
+        [x] SCENE SELECTOR — 3 profil streamer (ringan/normal/full)
         [x] Sembunyikan ESP (Drawing box/text/line)
         [x] Sembunyikan nametag player lain + nametag sendiri
         [x] Sembunyikan Highlight / SelectionBox (outline player)
@@ -17,13 +21,31 @@ local BASE = "https://raw.githubusercontent.com/lixxWW/ViolenceDistrict/refs/hea
 local CONFIG = {
     StreamerMode = {
         Enabled         = true,                        -- master switch (true = nyala pas inject)
-        ToggleKey       = Enum.KeyCode.RightShift,     -- tekan untuk ON/OFF live
-        HideESP         = true,    -- ESP (kotak/teks/garis Drawing)
-        HideNametags    = true,    -- nama di atas kepala player lain
-        HideYourNametag = true,    -- namamu sendiri dari layar
-        HideHighlights  = true,    -- Highlight / SelectionBox / esp outline
-        HideChat        = true,    -- chat + bubble chat
+        ToggleKey       = Enum.KeyCode.RightShift,     -- toggle ON/OFF streamer mode
+        PanicKey        = Enum.KeyCode.F8,             -- PANIC: langsung bersih semua (termasuk watermark)
         NotifyOnToggle  = true,
+    },
+
+    -- Profil streamer. Lo bisa switch live pake NumberPad1/2/3 atau ubah DefaultScene.
+    --   1 = Light  (cuma ESP yang ilang)
+    --   2 = Normal (chat, nametag, highlight ilang — ini safe buat kebanyakan stream)
+    --   3 = Full   (semua ilang, termasuk watermark ikut mati pas panic)
+    Scenes = {
+        Default = 2,
+
+        [1] = { Name = "Light",  HideESP = true,  HideNametags = false, HideYourNametag = false, HideHighlights = false, HideChat = false },
+        [2] = { Name = "Normal", HideESP = true,  HideNametags = true,  HideYourNametag = true,  HideHighlights = true,  HideChat = true  },
+        [3] = { Name = "Full",   HideESP = true,  HideNametags = true,  HideYourNametag = true,  HideHighlights = true,  HideChat = true  },
+    },
+
+    Watermark = {
+        Enabled   = true,
+        Text      = "LIVE",                           -- teks yang tampil
+        Position  = UDim2.new(0, 20, 1, -60),         -- pojok kiri bawah
+        Size      = 24,
+        Color     = Color3.fromRGB(255, 60, 60),
+        Stroke    = Color3.fromRGB(0, 0, 0),
+        StrokeWidth = 3,
     },
 }
 
@@ -44,7 +66,51 @@ local StarterGui        = game:GetService("StarterGui")
 local TextChatService   = game:GetService("TextChatService")
 
 local StreamerEnabled   = CONFIG.StreamerMode.Enabled
+local CurrentScene      = CONFIG.Scenes.Default
+local PanicActive       = false
 local trackedDrawings   = {}
+
+-- ============================================================
+--  WATERMARK OBS
+-- ============================================================
+local watermarkLabel
+local function buildWatermark()
+    if watermarkLabel then return end
+    local gui = nil
+    local lp = Players.LocalPlayer
+    local pg = lp and lp:FindFirstChild("PlayerGui")
+    if pg then gui = pg end
+
+    if not gui then
+        -- fallback: kalo PlayerGui belum ready, pasang di CoreGui lewat Instance biasa
+        gui = Instance.new("ScreenGui")
+        gui.Parent = game:GetService("CoreGui")
+    end
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Name = "GhostWatermark"
+    lbl.Text = CONFIG.Watermark.Text
+    lbl.Position = CONFIG.Watermark.Position
+    lbl.AnchorPoint = Vector2.new(0, 1)
+    lbl.Size = UDim2.new(0, 0, 0, 0)
+    lbl.AutomaticSize = Enum.AutomaticSize.XY
+    lbl.BackgroundTransparency = 1
+    lbl.TextSize = CONFIG.Watermark.Size
+    lbl.Font = Enum.Font.GothamBlack
+    lbl.TextColor3 = CONFIG.Watermark.Color
+    lbl.TextStrokeColor3 = CONFIG.Watermark.Stroke
+    lbl.TextStrokeTransparency = 0
+    lbl.ZIndex = 999
+    lbl.Visible = CONFIG.Watermark.Enabled
+    lbl.Parent = gui
+    watermarkLabel = lbl
+end
+
+local function setWatermarkVisible(v)
+    if watermarkLabel then
+        watermarkLabel.Visible = v and CONFIG.Watermark.Enabled
+    end
+end
 
 -- ============================================================
 --  STREAMER / OBS MODE MODULE
@@ -73,7 +139,7 @@ local function installEspHook()
         local d = origNew(class, props)
         if d then
             table.insert(trackedDrawings, d)
-            if StreamerEnabled and CONFIG.StreamerMode.HideESP then
+            if StreamerEnabled and not PanicActive and CurrentScene and CONFIG.Scenes[CurrentScene].HideESP then
                 pcall(function() d.Visible = false end)
             end
         end
@@ -82,14 +148,15 @@ local function installEspHook()
     return true
 end
 
--- Terapkan state streamer (dipanggil saat inject + saat toggle)
+-- Terapkan state streamer (dipanggil saat inject + saat toggle + saat ganti scene)
 local function applyStreamerState()
-    local hide = StreamerEnabled
+    local scene = CONFIG.Scenes[CurrentScene] or CONFIG.Scenes[2]
+    local hide = StreamerEnabled and not PanicActive
 
     -- ESP: sembunyikan/tampilkan semua Drawing yang sudah dibuat
     for _, d in ipairs(trackedDrawings) do
         pcall(function()
-            d.Visible = not (hide and CONFIG.StreamerMode.HideESP)
+            d.Visible = not (hide and scene.HideESP)
         end)
     end
 
@@ -97,15 +164,15 @@ local function applyStreamerState()
     pcall(function()
         StarterGui:SetCoreGuiEnabled(
             Enum.CoreGuiType.Chat,
-            not (hide and CONFIG.StreamerMode.HideChat)
+            not (hide and scene.HideChat)
         )
     end)
     pcall(function()
-        TextChatService.BubbleChatEnabled = not (hide and CONFIG.StreamerMode.HideChat)
+        TextChatService.BubbleChatEnabled = not (hide and scene.HideChat)
     end)
 
     -- Nametag sendiri
-    if CONFIG.StreamerMode.HideYourNametag then
+    if scene.HideYourNametag then
         pcall(function()
             local lp = Players.LocalPlayer
             local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
@@ -114,16 +181,20 @@ local function applyStreamerState()
             end
         end)
     end
+
+    -- Watermark ikut mati pas panic, tapi gak ikut off pas streamer mode normal
+    setWatermarkVisible(not PanicActive)
 end
 
 -- Loop bersih-bersih tiap frame: nametag + highlight player lain
 local function scrubWorld()
-    if not StreamerEnabled then return end
+    if not StreamerEnabled or PanicActive then return end
+    local scene = CONFIG.Scenes[CurrentScene] or CONFIG.Scenes[2]
 
     for _, plr in ipairs(Players:GetPlayers()) do
         local char = plr.Character
         if char then
-            if CONFIG.StreamerMode.HideNametags then
+            if scene.HideNametags then
                 local head = char:FindFirstChild("Head")
                 if head then
                     for _, g in ipairs(head:GetChildren()) do
@@ -133,7 +204,7 @@ local function scrubWorld()
                     end
                 end
             end
-            if CONFIG.StreamerMode.HideHighlights then
+            if scene.HideHighlights then
                 for _, v in ipairs(char:GetDescendants()) do
                     if v:IsA("Highlight") or v:IsA("SelectionBox") then
                         v.Enabled = false
@@ -155,23 +226,64 @@ local function notify(title, text)
     end)
 end
 
--- Toggle keybind
+-- Panic: langsung bersih semua, matiin watermark
+local function panic()
+    PanicActive = true
+    applyStreamerState()
+    notify("🚨 PANIC MODE", "Semua overlay dibersihkan. Tekan F8 lagi untuk balik.")
+end
+
+-- Balik dari panic
+local function unpanic()
+    PanicActive = false
+    applyStreamerState()
+    notify("✅ NORMAL", "Overlay kembali aktif (" .. (CONFIG.Scenes[CurrentScene] or {}).Name .. ")")
+end
+
+-- Ganti scene
+local function setScene(id)
+    if not CONFIG.Scenes[id] then return end
+    CurrentScene = id
+    applyStreamerState()
+    notify("🎬 Scene", "Profil: " .. CONFIG.Scenes[id].Name)
+end
+
+-- Keybind handler
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if input.KeyCode == CONFIG.StreamerMode.ToggleKey then
-        StreamerEnabled = not StreamerEnabled
-        applyStreamerState()
-        if CONFIG.StreamerMode.NotifyOnToggle then
-            notify(
-                "Streamer Mode",
-                StreamerEnabled and "🟢 ON — overlay disembunyikan" or "🔴 OFF — overlay tampil"
-            )
+        if PanicActive then
+            unpanic()
+        else
+            StreamerEnabled = not StreamerEnabled
+            applyStreamerState()
+            if CONFIG.StreamerMode.NotifyOnToggle then
+                notify(
+                    "Streamer Mode",
+                    StreamerEnabled and "🟢 ON — overlay disembunyikan" or "🔴 OFF — overlay tampil"
+                )
+            end
         end
+    elseif input.KeyCode == CONFIG.StreamerMode.PanicKey then
+        if PanicActive then
+            unpanic()
+        else
+            panic()
+        end
+    elseif input.KeyCode == Enum.KeyCode.KeypadOne or input.KeyCode == Enum.KeyCode.One then
+        setScene(1)
+    elseif input.KeyCode == Enum.KeyCode.KeypadTwo or input.KeyCode == Enum.KeyCode.Two then
+        setScene(2)
+    elseif input.KeyCode == Enum.KeyCode.KeypadThree or input.KeyCode == Enum.KeyCode.Three then
+        setScene(3)
     end
 end)
 
--- Init streamer module
+-- ============================================================
+--  INIT STREAMER MODULE
+-- ============================================================
+buildWatermark()
 installEspHook()
-applyStreamerState()
+setScene(CONFIG.Scenes.Default)
 RunService.RenderStepped:Connect(scrubWorld)
 
 -- ============================================================
@@ -222,5 +334,5 @@ if not fn then
     return
 end
 
-print("[Ghost] Script loaded. Eksekusi... (Streamer Mode: " .. tostring(StreamerEnabled) .. ")")
+print("[Ghost] Script loaded. Eksekusi... (Streamer Mode: " .. tostring(StreamerEnabled) .. ", Scene: " .. tostring(CONFIG.Scenes[CurrentScene].Name) .. ")")
 fn()
