@@ -1,80 +1,90 @@
+-- AGGRESSIVE VIP LOADER
 local BASE = "https://raw.githubusercontent.com/lixxWW/ViolenceDistrict/refs/heads/main/"
 
 local SCRIPTS = {
-    [93978595733734] = BASE .. "violencedistrict.lua",   -- Violence District
-    [97598239454123] = BASE .. "growagarden.lua",         -- Grow a Garden 2 (Old)
-    [77085202503540] = BASE .. "growagarden.lua",         -- Grow a Garden 2 (New)
-    [142823291]      = BASE .. "murdermystery2.lua",     -- Murder Mystery 2
-    [66654135]       = BASE .. "murdermystery2.lua",     -- Murder Mystery 2 Trade Plaza
+    [93978595733734] = BASE .. "violencedistrict.lua",
+    [97598239454123] = BASE .. "growagarden.lua",
+    [77085202503540] = BASE .. "growagarden.lua",
+    [142823291]      = BASE .. "murdermystery2.lua",
+    [66654135]       = BASE .. "murdermystery2.lua",
 }
 
--- === [MODIFIKASI: ADVANCED VIP HOOKING] ===
--- Kita mencoba membajak fungsi pengecekan Gamepass agar selalu mengembalikan nilai 'true'
-local oldUserOwnsGamePass = game:GetService("MarketplaceService").UserOwnsGamePassAsync
-game:GetService("MarketplaceService").UserOwnsGamePassAsync = function(self, userId, gamePassId)
-    print("[VIP Hook] Intercepted check for GamePass: " .. tostring(gamePassId) .. " -> Forcing TRUE")
-    return true -- Memaksa hasil jadi 'true' (punya VIP)
+-- 1. FORCED HOOKING (Dijalankan paling awal)
+local function applyHooks()
+    local success, err = pcall(function()
+        local mps = game:GetService("MarketplaceService")
+        local old = mps.UserOwnsGamePassAsync
+        mps.UserOwnsGamePassAsync = function(self, userId, gamePassId)
+            print("[VIP] Bypassing GamePass Check: " .. tostring(gamePassId))
+            return true
+        end
+    end)
+    if not success then warn("[VIP] Hooking failed: " .. tostring(err)) end
 end
+applyHooks()
 
--- Mencoba memanipulasi data di dalam PlayerGui atau Folder yang mungkin dicek oleh script
+-- 2. PERSISTENT VIP VALUE (Terus menerus membuat value VIP)
 task.spawn(function()
-    while task.wait(1) do
-        local player = game:GetService("Players").LocalPlayer
-        if player then
-            if not player:FindFirstChild("VIP") then
-                local v = Instance.new("BoolValue", player)
+    while task.wait(2) do
+        pcall(function()
+            local player = game:GetService("Players").LocalPlayer
+            if player then
+                local v = Instance.new("BoolValue")
                 v.Name = "VIP"
                 v.Value = true
+                v.Parent = player
+                
+                local v2 = Instance.new("BoolValue")
+                v2.Name = "HasVIPPass"
+                v2.Value = true
+                v2.Parent = player
             end
-            -- Tambahkan pengecekan folder umum lainnya jika ada
-        end
+        end)
     end
 end)
--- === [MODIFIKASI END] ===
 
+-- 3. SCRIPT LOADER LOGIC
 local placeId = game.PlaceId
-local url     = SCRIPTS[placeId]
+local url = SCRIPTS[placeId]
 
 if not url then
+    -- Deteksi otomatis untuk MM2
     local player = game:GetService("Players").LocalPlayer
-    local coinBags = player and player:FindFirstChild("PlayerGui")
-        and player.PlayerGui:FindFirstChild("MainGUI")
-        and player.PlayerGui.MainGUI:FindFirstChild("Game")
-        and player.PlayerGui.MainGUI.Game:FindFirstChild("CoinBags")
-    
-    if coinBags then
-        url = BASE .. "murdermystery2.lua"
-        print("[Loader] Game detected via CoinBags (Murder Mystery 2)")
-    else
-        warn("[Loader] No script found for PlaceId: " .. tostring(placeId))
-        return
-    end
-else
-    print("[Loader] Game detected: " .. tostring(placeId))
-end
-
-print("[Loader] Downloading script from ViolenceDistrict...")
-
-local nocacheUrl = url .. "?t=" .. tostring(math.floor(os.time() or tick()))
-local ok, scriptContent = pcall(function()
-    return game:HttpGet(nocacheUrl)
-end)
-
-if not ok or not scriptContent or #scriptContent == 0 then
-    ok, scriptContent = pcall(function()
-        return game:HttpGet(url)
+    pcall(function()
+        if player:FindFirstChild("PlayerGui") and player.PlayerGui:FindFirstChild("MainGUI") then
+            url = BASE .. "murdermystery2.lua"
+        end
     end)
 end
 
-if not ok or not scriptContent or #scriptContent == 0 then
-    warn("[Loader] Failed to download script from repository.")
-    return
+if not url then
+    warn("[Loader] No script found for this game. Trying default ViolenceDistrict...")
+    url = BASE .. "violencedistrict.lua"
 end
 
-local fn, err = loadstring(scriptContent)
-if not fn then
-    warn("[Loader] Compile error in target script: " .. tostring(err))
-    return
+print("[Loader] Attempting to load: " .. url)
+
+-- Download dengan retry mechanism
+local function downloadScript(targetUrl)
+    local success, content = pcall(function()
+        return game:HttpGet(targetUrl .. "?t=" .. tick())
+    end)
+    if not success then
+        success, content = pcall(function() return game:HttpGet(targetUrl) end)
+    end
+    return success, content
 end
-print("[Loader] Script loaded successfully. Executing...")
-fn()
+
+local ok, scriptContent = downloadScript(url)
+
+if ok and scriptContent then
+    local fn, err = loadstring(scriptContent)
+    if fn then
+        print("[Loader] Success! Executing...")
+        fn()
+    else
+        warn("[Loader] Loadstring error: " .. tostring(err))
+    end
+else
+    warn("[Loader] Failed to download script.")
+end
