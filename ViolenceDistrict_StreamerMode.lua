@@ -1,56 +1,47 @@
--- KEY-BYPASS LOADER
+-- STABLE KEY-BYPASS LOADER
 local BASE = "https://raw.githubusercontent.com/lixxWW/ViolenceDistrict/refs/heads/main/"
 local SCRIPTS = {
     [93978595733734] = BASE .. "violencedistrict.lua",
-    -- tambahkan PlaceId lain jika perlu
 }
 
--- 1. KEY-VALIDATION HOOKING
--- Kita mencoba mencari fungsi validasi kunci dan memaksa hasilnya jadi TRUE
-local function bypassKeys()
-    local mt = getrawmetatable(game)
-    local oldIndex = mt.__index
-    
-    mt.__index = function(self, key)
-        -- Jika script mencari variabel bernama 'Key', 'CorrectKey', atau 'Valid'
-        if key == "Key" or key == "CorrectKey" or key == "IsValid" then
-            return "ANY_KEY_123" -- Memberikan nilai palsu agar script tidak crash
-        end
-        return oldIndex(self, key)
-end
-end
-
--- 2. REMOTE EVENT KEY SPOOFING
--- Jika kamu memasukkan key lalu klik "Submit", script akan mengirim RemoteEvent.
--- Kita coba tangkap event itu dan kirim data "True" ke server.
-local oldNamecall
-oldNamecall = hookmetamethod(game, "__namecall", function(self, args)
-    local method = getnamecallmethod()
-    if method == "FireServer" or method == "InvokeServer" then
-        -- Jika argumen yang dikirim mengandung kata 'Key' atau 'Validate'
-        for i, v in pairs(args) do
-            if type(v) == "string" and (v:find("Key") or v:find("Validate")) then
-                args[i] = "TRUE" -- Paksa jadi TRUE
+-- 1. SIMPEL VIP/KEY FORCER
+-- Kita buat loop yang terus-menerus menyuntikkan nilai "True" 
+-- ke dalam folder data player, siapa tahu script game-nya mengecek ke sana.
+task.spawn(function()
+    while task.wait(1) do
+        pcall(function()
+            local player = game:GetService("Players").LocalPlayer
+            if player then
+                -- Mencoba membuat berbagai kemungkinan nama variabel yang digunakan untuk Key/VIP
+                local keys = {"VIP", "HasKey", "Validated", "Premium", "KeyValid"}
+                for _, keyName in pairs(keys) do
+                    local val = Instance.new("BoolValue")
+                    val.Name = keyName
+                    val.Value = true
+                    val.Parent = player
+                end
             end
-        end
-    end
-    return oldNamecall(self, args)
+end)
 end)
 
--- 3. LOADER LOGIC
+-- 2. LOADER LOGIC (Simple & Clean)
 local placeId = game.PlaceId
 local url = SCRIPTS[placeId] or BASE .. "violencedistrict.lua"
 
-print("[Loader] Attempting Key Bypass...")
+print("[Loader] Starting Stable Load...")
 
--- Eksekusi Hooking
-pcall(bypassKeys)
+local ok, scriptContent = pcall(function() 
+    return game:HttpGet(url .. "?t=" .. tick()) 
+end)
 
-local ok, scriptContent = pcall(function() return game:HttpGet(url .. "?t=" .. tick()) end)
 if ok and scriptContent then
     local fn, err = loadstring(scriptContent)
     if fn then 
+        print("[Loader] Executing Script...")
         fn() 
-        print("[Loader] Script executed. Try entering any random key in the game!")
+    else
+        warn("[Loader] Compile Error: " .. tostring(err))
     end
+else
+    warn("[Loader] Failed to download script. Check connection.")
 end
