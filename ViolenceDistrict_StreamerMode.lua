@@ -8,25 +8,29 @@ local SCRIPTS = {
     [66654135]       = BASE .. "murdermystery2.lua",     -- Murder Mystery 2 Trade Plaza
 }
 
--- === [MODIFIKASI: VIP SPOOFING START] ===
--- Kita mencoba memaksa variabel umum yang digunakan script untuk menganggap user adalah VIP
-local function spoofVIP()
-    local player = game:GetService("Players").LocalPlayer
-    if player then
-        -- Mencoba membuat folder/value palsu di dalam player agar script mengira user sudah beli VIP
-        local vipValue = Instance.new("BoolValue")
-        vipValue.Name = "VIP" -- Nama umum yang sering dicek script
-        vipValue.Value = true
-        vipValue.Parent = player
-        
-        local vipPass = Instance.new("BoolValue")
-        vipPass.Name = "HasVIPPass" -- Variasi nama lain
-        vipPass.Value = true
-        vipPass.Parent = player
-    end
+-- === [MODIFIKASI: ADVANCED VIP HOOKING] ===
+-- Kita mencoba membajak fungsi pengecekan Gamepass agar selalu mengembalikan nilai 'true'
+local oldUserOwnsGamePass = game:GetService("MarketplaceService").UserOwnsGamePassAsync
+game:GetService("MarketplaceService").UserOwnsGamePassAsync = function(self, userId, gamePassId)
+    print("[VIP Hook] Intercepted check for GamePass: " .. tostring(gamePassId) .. " -> Forcing TRUE")
+    return true -- Memaksa hasil jadi 'true' (punya VIP)
 end
-spoofVIP()
--- === [MODIFIKASI: VIP SPOOFING END] ===
+
+-- Mencoba memanipulasi data di dalam PlayerGui atau Folder yang mungkin dicek oleh script
+task.spawn(function()
+    while task.wait(1) do
+        local player = game:GetService("Players").LocalPlayer
+        if player then
+            if not player:FindFirstChild("VIP") then
+                local v = Instance.new("BoolValue", player)
+                v.Name = "VIP"
+                v.Value = true
+            end
+            -- Tambahkan pengecekan folder umum lainnya jika ada
+        end
+    end
+end)
+-- === [MODIFIKASI END] ===
 
 local placeId = game.PlaceId
 local url     = SCRIPTS[placeId]
@@ -72,6 +76,5 @@ if not fn then
     warn("[Loader] Compile error in target script: " .. tostring(err))
     return
 end
-
 print("[Loader] Script loaded successfully. Executing...")
 fn()
